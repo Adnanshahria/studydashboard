@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="google" content="notranslate" />
+    <title>AS Study Dashboard v20.1 (Glass)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@300;400;500;600;700&family=Inter:wght@300;400;600;700;900&display=swap" rel="stylesheet" />
+    <script>
+      tailwind.config = {
+        darkMode: ['class', '[data-theme="dark"]'],
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'Noto Sans Bengali', 'sans-serif'],
+            },
+            colors: {
+              border: {
+                light: 'rgba(0, 0, 0, 0.1)',
+                dark: 'rgba(255, 255, 255, 0.1)',
+              }
+            },
+            animation: {
+              'shimmer': 'shimmer 2s infinite',
+              'pulse-glow': 'pulse-glow 3s infinite alternate',
+            },
+            keyframes: {
+              shimmer: {
+                '100%': { transform: 'translateX(100%)' },
+              },
+              'pulse-glow': {
+                '0%, 100%': { opacity: '0.3', transform: 'scale(1)' },
+                '50%': { opacity: '0.5', transform: 'scale(1.1)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --bg-light: #f8fafc;
+        --bg-dark: #0f172a;
+      }
+      body {
+        margin: 0;
+        height: 100%;
+        background-color: var(--bg-dark);
+        color: #e2e8f0;
+        transition: background-color 0.3s ease;
+      }
+      html[data-theme="light"] body {
+        background-color: var(--bg-light);
+        color: #1e293b;
+      }
+      
+      /* Custom Scrollbar */
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); border-radius: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 4px; opacity: 0.5; }
+      .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #3b82f6 transparent; }
+
+      /* Glassmorphism Utilities */
+      .glass-card {
+        background: rgba(30, 41, 59, 0.7);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        transition: all 0.3s ease;
+      }
+      
+      html[data-theme="light"] .glass-card {
+         background: #ffffff;
+         border: 1px solid #e2e8f0;
+         box-shadow: 
+            0 4px 6px -1px rgba(0, 0, 0, 0.05), 
+            0 2px 4px -1px rgba(0, 0, 0, 0.03);
+         backdrop-filter: none;
+         -webkit-backdrop-filter: none;
+      }
+      
+      @media print {
+        body { background: white; color: black; }
+        .no-print { display: none !important; }
+        .print-only { display: block !important; }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
+    "react": "https://esm.sh/react@18.2.0",
+    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime?deps=react@18.2.0",
+    "firebase/app": "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+    "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

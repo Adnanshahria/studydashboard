@@ -1,0 +1,5 @@
+{
+  "name": "AS Study Dashboard",
+  "description": "A comprehensive study progress tracker with weighted scoring, syllabus management, and cloud sync.",
+  "requestFramePermissions": []
+}
