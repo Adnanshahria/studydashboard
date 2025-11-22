@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { DEFAULT_SETTINGS, INITIAL_SYLLABUS_DATA } from './constants';
 import { UserData, UserSettings, TrackableItem, Chapter } from './types';
@@ -146,7 +145,7 @@ function App() {
     }
   };
 
-  // --- CRUD OPERATIONS (Deep Clone enforced for delete) ---
+  // --- CRUD OPERATIONS ---
 
   const getSubjectItems = (subjectKey: string): TrackableItem[] => {
       if (settings.subjectConfigs && settings.subjectConfigs[subjectKey]) {
@@ -195,7 +194,7 @@ function App() {
       const newConfigs = { ...(settings.subjectConfigs || {}) };
       newConfigs[subjectKey] = currentItems;
       handleSettingsUpdate({ ...settings, subjectConfigs: newConfigs });
-  };
+      };
 
   const onAddChapter = (subjectKey: string, paper: 1 | 2, name: string) => {
       const currentSub = settings.syllabus[subjectKey];
@@ -230,7 +229,6 @@ function App() {
 
       try {
         if (modalMode === 'reset') {
-            // DIRECT RESET FLOW via Shadow system
             const result = await resetUserPassword(inputId, inputPass);
             if (result.success) {
                 setModalSuccess('Password added successfully! You can now log in.');
@@ -242,7 +240,6 @@ function App() {
             }
         } else if (modalMode === 'login') {
             let result = await authenticateUser(inputId, inputPass);
-            // Fallback to Shadow Auth if standard fails
             if (!result.success) {
                 result = await shadowLogin(inputId, inputPass);
             }
@@ -520,10 +517,35 @@ function App() {
                 </div>
             </div>
         </Modal>
-        {/* Dev Modal excluded for brevity, kept same */}
+
+        {/* UPDATED DEVELOPER MODAL WITH YOUR INFO */}
         <Modal isOpen={showDevModal} onClose={() => setShowDevModal(false)} title="Developer Info">
-             {/* Same content */}
-            <Button onClick={() => setShowDevModal(false)} className="w-full mt-2">Close</Button>
+            <div className="flex flex-col gap-3">
+                <div className="p-4 bg-slate-100 dark:bg-white/5 rounded-xl border border-slate-200 dark:border-white/10 space-y-3">
+                    <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Developer</p>
+                        <p className="text-base font-bold text-slate-800 dark:text-slate-200">Mohammad Adnan Shahria</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Role</p>
+                        <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Full Stack Student Developer</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Contact</p>
+                        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">adnanshahria2006@gmail.com</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Version</p>
+                        <p className="text-xs font-mono text-slate-500 dark:text-slate-400">v20.10 (Glass Edition)</p>
+                    </div>
+                </div>
+                
+                <p className="text-center text-xs text-slate-400 italic my-1">
+                    "Built with React, Tailwind & Firebase"
+                </p>
+
+                <Button onClick={() => setShowDevModal(false)} className="w-full">Close</Button>
+            </div>
         </Modal>
     </div>
   );
