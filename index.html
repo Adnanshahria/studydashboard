@@ -73,14 +73,16 @@
       }
       
       html[data-theme="light"] .glass-card {
-         background: #ffffff;
-         border: 1px solid #e2e8f0;
-         box-shadow: [c]
-            0 4px 6px -1px rgba(0, 0, 0, 0.05), 
-            0 2px 4px -1px rgba(0, 0, 0, 0.03);
-         backdrop-filter: none;
-         -webkit-backdrop-filter: none;
-      }
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    /* [c] কেটে দিয়ে নিচের মতো করুন */
+    box_shadow: 
+        0 4px 6px -1px rgba(0, 0, 0, 0.05),
+        0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
       
       @media print {
         body { background: white; color: black; }
