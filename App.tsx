@@ -1,9 +1,8 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { DEFAULT_SETTINGS, INITIAL_SYLLABUS_DATA } from './constants';
 import { UserData, UserSettings, TrackableItem, Chapter } from './types';
 import { calculateGlobalComposite, getStreak } from './utils/calculations';
-import { openDB, dbPut, initFirebase, cleanupStorage, dbClear, authenticateUser, createUser, loginAnonymously, saveSettings, saveUserProgress } from './utils/storage';
+import { openDB, dbPut, initFirebase, cleanupStorage, dbClear, authenticateUser, createUser, loginAnonymously, saveSettings, saveUserProgress, resetUserPassword } from './utils/storage';
 import { HeroSection } from './components/HeroSection';
 import { Sidebar } from './components/Sidebar';
 import { Syllabus } from './components/Syllabus';
@@ -25,10 +24,13 @@ function App() {
 
   // UI State
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [modalMode, setModalMode] = useState<'login' | 'create'>('login');
+  const [modalMode, setModalMode] = useState<'login' | 'create' | 'reset'>('login');
   const [tempUserId, setTempUserId] = useState('');
   const [tempPassword, setTempPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [modalError, setModalError] = useState('');
+  const [modalSuccess, setModalSuccess] = useState('');
   const [isCheckingUser, setIsCheckingUser] = useState(false);
   const [showDevModal, setShowDevModal] = useState(false);
 
@@ -41,6 +43,17 @@ function App() {
       setUserData({});
       setSettings(DEFAULT_SETTINGS);
       setUserId(null);
+      // Inject print styles
+      const style = document.createElement('style');
+      style.innerHTML = `
+        @media print {
+            body * { visibility: hidden; }
+            #syllabus-print-container, #syllabus-print-container * { visibility: visible; }
+            #syllabus-print-container { position: absolute; left: 0; top: 0; width: 100%; }
+        }
+      `;
+      document.head.appendChild(style);
+      return () => { document.head.removeChild(style); }
   }, []);
 
   // AUTH & DATA SYNC LOGIC
@@ -52,31 +65,26 @@ function App() {
     
     const init = async () => {
       try {
-        // 1. Clean local indexedDB for fresh user session to prevent data leak
         await openDB();
         await dbClear('userData'); 
         
-        // 2. Initialize Firebase Listener
         unsub = await initFirebase(
             userId, 
             (remoteData, remoteSettings) => {
-                // Update Data
                 if (remoteData) {
                     setUserData(prev => ({ ...prev, ...remoteData }));
                     dbPut('userData', { id: 'main', value: remoteData });
                 }
                 
-                // Update Settings
                 if (remoteSettings) {
                     setSettings(prev => {
-                        // Deep merge remote settings onto default to ensure structure
-                        // We do NOT merge with 'prev' here to ensure server deletions are respected.
                         const merged: UserSettings = { 
                             ...DEFAULT_SETTINGS, 
                             ...remoteSettings,
-                            // Ensure syllabus is correctly merged/replaced
                             syllabus: remoteSettings.syllabus || JSON.parse(JSON.stringify(INITIAL_SYLLABUS_DATA)),
-                            trackableItems: remoteSettings.trackableItems || DEFAULT_SETTINGS.trackableItems
+                            trackableItems: remoteSettings.trackableItems || DEFAULT_SETTINGS.trackableItems,
+                            subjectConfigs: remoteSettings.subjectConfigs || {},
+                            subjectWeights: remoteSettings.subjectWeights || {}
                         };
                         
                         dbPut('userData', { id: 'settings', value: merged });
@@ -86,7 +94,6 @@ function App() {
                 setIsLoading(false);
             }, 
             (status) => setConnectionStatus(status),
-            // Pass current local state for migration if this is a new user
             localSettingsRef.current, 
             localDataRef.current      
         );
@@ -99,7 +106,6 @@ function App() {
 
     init();
 
-    // CLEANUP FUNCTION to prevent Data Leaks between users
     return () => {
         unsub();
         cleanupStorage();
@@ -124,10 +130,8 @@ function App() {
   };
 
   const handleSettingsUpdate = async (newSettings: UserSettings) => {
-      // Optimistic Update
       setSettings(newSettings);
       if(!userId) return;
-      // Cloud Save (Replacement)
       await saveSettings(userId, newSettings);
   };
 
@@ -135,58 +139,73 @@ function App() {
       handleSettingsUpdate({ ...settings, theme: settings.theme === 'dark' ? 'light' : 'dark' });
   };
 
-  // --- CRUD OPERATIONS (DEEP CLONING TO FIX DELETION BUGS) ---
+  const handleWeightUpdate = (newWeights: any, subjectKey?: string) => {
+    if (subjectKey) {
+        const updated = { ...(settings.subjectWeights || {}) };
+        updated[subjectKey] = newWeights;
+        handleSettingsUpdate({ ...settings, subjectWeights: updated });
+    } else {
+        handleSettingsUpdate({ ...settings, weights: newWeights });
+    }
+  };
+
+  // --- CRUD OPERATIONS ---
+
+  const getSubjectItems = (subjectKey: string): TrackableItem[] => {
+      if (settings.subjectConfigs && settings.subjectConfigs[subjectKey]) {
+          return JSON.parse(JSON.stringify(settings.subjectConfigs[subjectKey]));
+      }
+      return JSON.parse(JSON.stringify(settings.trackableItems));
+  };
 
   const onDeleteChapter = (subjectKey: string, chapterId: number | string) => {
       const currentSub = settings.syllabus[subjectKey];
       if(!currentSub) return;
       
       if(window.confirm(`Are you sure you want to delete this chapter? This cannot be undone.`)) {
-          // Deep clone to break references
           const newSyllabus = JSON.parse(JSON.stringify(settings.syllabus));
-          
-          // Filter out the chapter
           newSyllabus[subjectKey].chapters = newSyllabus[subjectKey].chapters.filter((c: Chapter) => c.id !== chapterId);
-          
-          // Update state and cloud
           handleSettingsUpdate({ ...settings, syllabus: newSyllabus });
       }
   };
 
-  const onDeleteColumn = (itemKey: string) => {
-      if(window.confirm(`Are you sure you want to delete this column? It will be removed from ALL subjects.`)) {
-          // Deep clone items
-          const newItems = settings.trackableItems.filter(t => t.key !== itemKey);
-          
-          // Update state and cloud
-          handleSettingsUpdate({ ...settings, trackableItems: newItems });
+  const onDeleteColumn = (subjectKey: string, itemKey: string) => {
+      if(window.confirm(`Are you sure you want to delete this column from ${settings.syllabus[subjectKey]?.name || 'this subject'}?`)) {
+          let currentItems = getSubjectItems(subjectKey);
+          currentItems = currentItems.filter(t => t.key !== itemKey);
+          const newConfigs = { ...(settings.subjectConfigs || {}) };
+          newConfigs[subjectKey] = currentItems;
+          handleSettingsUpdate({ ...settings, subjectConfigs: newConfigs });
       }
   };
 
-  const onAddColumn = (name: string, color: string) => {
-      const newKey = `custom_col_${Date.now()}`;
+  const onRenameColumn = (subjectKey: string, itemKey: string, newName: string) => {
+      const currentItems = getSubjectItems(subjectKey);
+      const itemIndex = currentItems.findIndex(t => t.key === itemKey);
+      if (itemIndex !== -1) {
+          currentItems[itemIndex].name = newName;
+          const newConfigs = { ...(settings.subjectConfigs || {}) };
+          newConfigs[subjectKey] = currentItems;
+          handleSettingsUpdate({ ...settings, subjectConfigs: newConfigs });
+      }
+  };
+
+  const onAddColumn = (subjectKey: string, name: string, color: string) => {
+      const newKey = `custom_col_${Date.now()}_${Math.floor(Math.random()*1000)}`;
       const newItem: TrackableItem = { name, color, key: newKey };
-      
-      // Deep clone array
-      const newItems = [...settings.trackableItems, newItem];
-      
-      handleSettingsUpdate({ ...settings, trackableItems: newItems });
+      const currentItems = getSubjectItems(subjectKey);
+      currentItems.push(newItem);
+      const newConfigs = { ...(settings.subjectConfigs || {}) };
+      newConfigs[subjectKey] = currentItems;
+      handleSettingsUpdate({ ...settings, subjectConfigs: newConfigs });
   };
 
   const onAddChapter = (subjectKey: string, paper: 1 | 2, name: string) => {
       const currentSub = settings.syllabus[subjectKey];
       if(!currentSub) return;
-      
-      const newChapter: Chapter = {
-          id: `custom_${Date.now()}`,
-          name,
-          paper
-      };
-      
-      // Deep clone syllabus to prevent "Ghost Rows" in other subjects
+      const newChapter: Chapter = { id: `custom_${Date.now()}`, name, paper };
       const newSyllabus = JSON.parse(JSON.stringify(settings.syllabus));
       newSyllabus[subjectKey].chapters.push(newChapter);
-      
       handleSettingsUpdate({ ...settings, syllabus: newSyllabus });
   };
 
@@ -195,19 +214,44 @@ function App() {
   const handleUserAction = async () => {
       if (!tempUserId.trim()) return;
       setModalError('');
+      setModalSuccess('');
+
+      // Validation
+      if (modalMode === 'create' || modalMode === 'reset') {
+          if (tempPassword !== confirmPassword) {
+              setModalError("Passwords do not match.");
+              return;
+          }
+          if (tempPassword.length < 6) {
+              setModalError("Password must be at least 6 characters.");
+              return;
+          }
+      }
+
       setIsCheckingUser(true);
-      
       const inputId = tempUserId.trim();
       const inputPass = tempPassword.trim();
 
       try {
-        if (modalMode === 'login') {
+        if (modalMode === 'reset') {
+            // NOTE: Firebase client SDK does not support changing password without login/old password
+            // unless utilizing the email reset link. We use sendPasswordResetEmail.
+            // The password input here is technically unused for the API call but required by user request UI.
+            // We will trigger the email flow.
+            const result = await resetUserPassword(inputId);
+            if (result.success) {
+                setModalSuccess('Security Link sent to email. Please check to reset.');
+                setTempPassword('');
+                setConfirmPassword('');
+            } else {
+                setModalError(result.error || 'Reset failed.');
+            }
+        } else if (modalMode === 'login') {
             const result = await authenticateUser(inputId, inputPass);
             if (result.success && result.uid) {
                 setUserId(result.uid);
                 setShowLoginModal(false);
-                setTempUserId('');
-                setTempPassword('');
+                resetModalState();
             } else {
                 setModalError(result.error || 'Login failed.');
             }
@@ -216,8 +260,7 @@ function App() {
             if (result.success && result.uid) {
                 setUserId(result.uid);
                 setShowLoginModal(false);
-                setTempUserId('');
-                setTempPassword('');
+                resetModalState();
             } else {
                 setModalError(result.error || 'Creation failed.');
             }
@@ -248,7 +291,6 @@ function App() {
   };
 
   const handleLogout = () => {
-      // Aggressive cleanup
       setUserId(null);
       setUserData({});
       setSettings(DEFAULT_SETTINGS);
@@ -257,12 +299,21 @@ function App() {
       cleanupStorage();
   };
 
+  const resetModalState = () => {
+      setTempUserId('');
+      setTempPassword('');
+      setConfirmPassword('');
+      setShowPassword(false);
+      setModalError('');
+      setModalSuccess('');
+  };
+
   const compositeData = calculateGlobalComposite(userData, settings);
   const streak = getStreak(userData);
 
   return (
     <div className="min-h-screen pb-10 text-slate-800 dark:text-slate-200 selection:bg-blue-500/30 selection:text-blue-600 dark:selection:text-blue-200 transition-colors duration-300">
-        <header className="sticky top-0 z-50 w-full header-glass border-b border-slate-200 dark:border-white/5 transition-colors duration-300">
+        <header className="sticky top-0 z-50 w-full header-glass border-b border-slate-200 dark:border-white/5 transition-colors duration-300 no-print">
             <div className="glass-card border-none rounded-none bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl">
                  <div className="max-w-screen-xl mx-auto flex justify-between items-center py-3 px-4">
                     <div className="flex items-center gap-3">
@@ -273,7 +324,7 @@ function App() {
                         >
                             AS
                         </div>
-                        <h1 className="text-lg font-bold tracking-tight text-slate-800 dark:text-slate-100">Study Dashboard <span className="text-[10px] align-top font-normal text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5">v20.8</span></h1>
+                        <h1 className="text-lg font-bold tracking-tight text-slate-800 dark:text-slate-100">Study Dashboard <span className="text-[10px] align-top font-normal text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5">v20.9</span></h1>
                     </div>
                     <div className="flex items-center gap-3">
                         <div className={`flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${connectionStatus === 'connected' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-500' : 'bg-slate-500/10 border-slate-500/20 text-slate-500'}`}>
@@ -307,45 +358,48 @@ function App() {
                     </div>
                 ) : (
                     <>
-                        <HeroSection 
-                            compositeData={compositeData} 
-                            streak={streak} 
-                            settings={settings}
-                            onUpdateWeights={(w) => handleSettingsUpdate({ ...settings, weights: w })}
-                            onUpdateCountdown={(target, label) => handleSettingsUpdate({ ...settings, countdownTarget: target, countdownLabel: label })}
-                        />
+                        <div className="no-print">
+                            <HeroSection 
+                                compositeData={compositeData} 
+                                streak={streak} 
+                                settings={settings}
+                                onUpdateWeights={handleWeightUpdate}
+                                onUpdateCountdown={(target, label) => handleSettingsUpdate({ ...settings, countdownTarget: target, countdownLabel: label })}
+                            />
+                        </div>
                         
                         <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 items-start">
-                            <Sidebar 
-                                activeSubject={activeSubject} 
-                                onChangeSubject={setActiveSubject}
-                                userData={userData}
-                                settings={settings}
-                                onUpdateSettings={handleSettingsUpdate}
-                            />
-                            <Syllabus 
-                                activeSubject={activeSubject} 
-                                userData={userData} 
-                                settings={settings}
-                                onUpdateStatus={handleStatusUpdate}
-                                onUpdateNote={(key, text) => {
-                                    const newVal = { ...userData, [`note_${key}`]: text };
-                                    setUserData(newVal); 
-                                    saveUserProgress(userId, { [`note_${key}`]: text });
-                                }}
-                                onTogglePaper={(key) => {
-                                    const newState = { ...settings.syllabusOpenState, [key]: !settings.syllabusOpenState[key] };
-                                    handleSettingsUpdate({ ...settings, syllabusOpenState: newState });
-                                }}
-                                onRenameColumn={(key, newName) => {
-                                    const newNames = { ...settings.customNames, [key]: newName };
-                                    handleSettingsUpdate({ ...settings, customNames: newNames });
-                                }}
-                                onAddColumn={onAddColumn}
-                                onAddChapter={onAddChapter}
-                                onDeleteChapter={onDeleteChapter}
-                                onDeleteColumn={onDeleteColumn}
-                            />
+                            <div className="no-print">
+                                <Sidebar 
+                                    activeSubject={activeSubject} 
+                                    onChangeSubject={setActiveSubject}
+                                    userData={userData}
+                                    settings={settings}
+                                    onUpdateSettings={handleSettingsUpdate}
+                                />
+                            </div>
+                            <div id="syllabus-print-container">
+                                <Syllabus 
+                                    activeSubject={activeSubject} 
+                                    userData={userData} 
+                                    settings={settings}
+                                    onUpdateStatus={handleStatusUpdate}
+                                    onUpdateNote={(key, text) => {
+                                        const newVal = { ...userData, [`note_${key}`]: text };
+                                        setUserData(newVal); 
+                                        saveUserProgress(userId, { [`note_${key}`]: text });
+                                    }}
+                                    onTogglePaper={(key) => {
+                                        const newState = { ...settings.syllabusOpenState, [key]: !settings.syllabusOpenState[key] };
+                                        handleSettingsUpdate({ ...settings, syllabusOpenState: newState });
+                                    }}
+                                    onRenameColumn={onRenameColumn}
+                                    onAddColumn={onAddColumn}
+                                    onAddChapter={onAddChapter}
+                                    onDeleteChapter={onDeleteChapter}
+                                    onDeleteColumn={onDeleteColumn}
+                                />
+                            </div>
                         </div>
                     </>
                 )
@@ -362,18 +416,19 @@ function App() {
         </main>
 
         {/* MODALS */}
-        <Modal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} title={modalMode === 'login' ? 'Sign In' : 'Create Account'}>
+        <Modal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} title={modalMode === 'login' ? 'Sign In' : modalMode === 'create' ? 'Create Account' : 'Reset Password'}>
             <div className="flex flex-col gap-4">
                 <div className="flex p-1 bg-slate-100 dark:bg-white/5 rounded-lg">
                     <button 
-                        onClick={() => { setModalMode('login'); setModalError(''); }}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${modalMode === 'login' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                        onClick={() => { setModalMode('login'); resetModalState(); }}
+                        className={`flex-1 py-2 text-xs font-bold rounded-md transition-all duration-300 ${modalMode === 'login' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-white/10'}`}
                     >
                         Sign In
                     </button>
                     <button 
-                        onClick={() => { setModalMode('create'); setModalError(''); }}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${modalMode === 'create' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                        onClick={() => { setModalMode('create'); resetModalState(); }}
+                        className={`flex-1 py-2 text-xs font-bold rounded-md transition-all duration-300 ${modalMode === 'create' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-white/10 animate-pulse shadow-rose-500/0'}`}
+                        style={modalMode !== 'create' ? { boxShadow: '0 0 10px 1px rgba(244, 63, 94, 0.3)' } : {}}
                     >
                         Create Account
                     </button>
@@ -391,38 +446,78 @@ function App() {
                             className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-blue-500 text-slate-800 dark:text-white"
                         />
                     </div>
+                    
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] uppercase font-bold text-slate-400">Password {modalMode === 'create' && '(Min 6 chars)'}</label>
-                        <input 
-                            type="password" 
-                            value={tempPassword}
-                            onChange={(e) => setTempPassword(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleUserAction()}
-                            placeholder="••••••••"
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-blue-500 text-slate-800 dark:text-white"
-                        />
+                        <div className="flex justify-between">
+                            <label className="text-[10px] uppercase font-bold text-slate-400">
+                                {modalMode === 'reset' ? 'New Password' : 'Password'} 
+                                {(modalMode === 'create' || modalMode === 'reset') && '(Min 6 chars)'}
+                            </label>
+                            {modalMode === 'login' && (
+                                <button onClick={() => { setModalMode('reset'); resetModalState(); }} className="text-[10px] font-bold text-blue-500 hover:underline">
+                                    Forgot Password?
+                                </button>
+                            )}
+                        </div>
+                        <div className="relative">
+                            <input 
+                                type={showPassword ? "text" : "password"}
+                                value={tempPassword}
+                                onChange={(e) => setTempPassword(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUserAction()}
+                                placeholder="••••••••"
+                                className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-blue-500 text-slate-800 dark:text-white"
+                            />
+                            <button 
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500"
+                            >
+                                {showPassword ? '🙈' : '👁️'}
+                            </button>
+                        </div>
                     </div>
 
+                    {(modalMode === 'create' || modalMode === 'reset') && (
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] uppercase font-bold text-slate-400">Confirm {modalMode === 'reset' ? 'New ' : ''}Password</label>
+                            <input 
+                                type="password" 
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUserAction()}
+                                placeholder="••••••••"
+                                className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-blue-500 text-slate-800 dark:text-white"
+                            />
+                        </div>
+                    )}
+
                     {modalError && <p className="text-xs text-rose-500 font-medium bg-rose-500/10 p-2 rounded">{modalError}</p>}
+                    {modalSuccess && <p className="text-xs text-emerald-500 font-medium bg-emerald-500/10 p-2 rounded">{modalSuccess}</p>}
                 </div>
 
                 <div className="flex flex-col gap-3 mt-2">
-                    <Button onClick={handleUserAction} disabled={!tempUserId.trim() || isCheckingUser} className="w-full py-3">
-                        {isCheckingUser ? 'Checking...' : (modalMode === 'login' ? 'Sign In' : 'Create Account')}
+                    <Button 
+                        onClick={handleUserAction} 
+                        disabled={!tempUserId.trim() || isCheckingUser} 
+                        className={`w-full py-3 ${modalMode === 'create' ? 'bg-blue-600' : modalMode === 'reset' ? 'bg-amber-500 hover:bg-amber-600' : ''}`}
+                    >
+                        {isCheckingUser ? 'Processing...' : (modalMode === 'login' ? 'Sign In' : modalMode === 'create' ? 'Create Account' : 'Update Password')}
                     </Button>
                     
-                    <div className="relative flex items-center py-2">
-                        <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
-                        <span className="flex-shrink-0 mx-4 text-[10px] text-slate-400 uppercase font-bold">Or</span>
-                        <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
-                    </div>
-
-                    <button 
-                        onClick={handleGuestLogin}
-                        className="w-full py-2.5 rounded-lg border border-dashed border-slate-300 dark:border-white/20 text-slate-500 dark:text-slate-400 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/5 transition-all flex items-center justify-center gap-2"
-                    >
-                        <span>👤 Continue as Guest</span>
-                    </button>
+                    {modalMode === 'login' && (
+                        <button 
+                            onClick={handleGuestLogin}
+                            className="w-full py-2.5 rounded-lg border border-dashed border-slate-300 dark:border-white/20 text-slate-500 dark:text-slate-400 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/5 transition-all flex items-center justify-center gap-2"
+                        >
+                            <span>👤 Continue as Guest</span>
+                        </button>
+                    )}
+                    
+                    {modalMode === 'reset' && (
+                        <button onClick={() => setModalMode('login')} className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white mt-2">
+                            Back to Sign In
+                        </button>
+                    )}
                 </div>
             </div>
         </Modal>

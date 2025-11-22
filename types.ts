@@ -37,13 +37,16 @@ export interface ProgressBarConfig {
 export interface UserSettings {
   theme: 'dark' | 'light';
   soundVolume: number;
-  weights: WeightConfig;
+  weights: WeightConfig; // Global fallback weights
+  subjectWeights?: Record<string, WeightConfig>; // Per-subject weights
+  
   progressBars: ProgressBarConfig[];
   syllabusOpenState: Record<string, boolean>;
   subjectProgressItems: string[];
   subjectProgressWeights?: Record<string, number>;
   customNames: Record<string, string>;
-  trackableItems: TrackableItem[]; 
+  trackableItems: TrackableItem[]; // Global default items
+  subjectConfigs?: Record<string, TrackableItem[]>; // Per-subject item overrides
   
   // The single source of truth for subjects and chapters
   syllabus: SyllabusData; 

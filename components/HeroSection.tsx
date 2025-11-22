@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CompositeData, UserSettings } from '../types';
+import { CompositeData, UserSettings, TrackableItem } from '../types';
 import { TRACKABLE_ITEMS } from '../constants';
 import { Button, Modal } from './UI';
 
@@ -7,7 +7,7 @@ interface HeroSectionProps {
     compositeData: CompositeData;
     streak: number;
     settings: UserSettings;
-    onUpdateWeights: (newWeights: any) => void;
+    onUpdateWeights: (newWeights: any, subjectKey?: string) => void;
     onUpdateCountdown: (target: string, label: string) => void;
 }
 
@@ -15,21 +15,18 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
     const [countdown, setCountdown] = useState<{ d: number; h: number; m: number } | null>(null);
     const [isEditingWeights, setIsEditingWeights] = useState(false);
     const [isEditingCountdown, setIsEditingCountdown] = useState(false);
-    const [tempWeights, setTempWeights] = useState(settings.weights);
-    const [weightTotal, setWeightTotal] = useState(100);
+    
+    // Weight Config State
+    const [selectedSubject, setSelectedSubject] = useState<string>('global');
+    const [tempWeights, setTempWeights] = useState<Record<string, number>>({});
+    const [weightTotal, setWeightTotal] = useState(0);
 
     // Countdown Config State
     const [tempTarget, setTempTarget] = useState(settings.countdownTarget || '2025-12-12T00:00');
     const [tempLabel, setTempLabel] = useState(settings.countdownLabel || 'Time Remaining');
 
-    // Resolve custom names
-    const getDisplayName = (key: string, defaultName: string) => {
-        return settings.customNames?.[key] || defaultName;
-    };
-
     useEffect(() => {
         const targetDateStr = settings.countdownTarget || '2025-12-12T00:00:00+06:00';
-        // Ensure format is parseable
         const target = new Date(targetDateStr);
         
         const interval = setInterval(() => {
@@ -45,8 +42,23 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
         return () => clearInterval(interval);
     }, [settings.countdownTarget]);
 
+    // Load weights when modal opens or subject changes
     useEffect(() => {
-        const total = Object.values(tempWeights).reduce((a, b) => a + b, 0);
+        if (isEditingWeights) {
+            let w: Record<string, number> = {};
+            if (selectedSubject === 'global') {
+                w = { ...settings.weights };
+            } else {
+                // Load subject specific weights, or fallback to global
+                w = { ...(settings.subjectWeights?.[selectedSubject] || settings.weights) };
+            }
+            setTempWeights(w);
+        }
+    }, [isEditingWeights, selectedSubject, settings]);
+
+    // Calculate total
+    useEffect(() => {
+        const total = Object.values(tempWeights).reduce((a: number, b: number) => a + b, 0);
         setWeightTotal(total);
     }, [tempWeights]);
 
@@ -57,7 +69,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
 
     const saveWeights = () => {
         if (weightTotal === 100) {
-            onUpdateWeights(tempWeights);
+            // If global, we pass undefined as subjectKey (or handle in App)
+            // If subject, we pass key
+            const key = selectedSubject === 'global' ? undefined : selectedSubject;
+            onUpdateWeights(tempWeights, key);
             setIsEditingWeights(false);
         }
     };
@@ -66,6 +81,11 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
         onUpdateCountdown(tempTarget, tempLabel);
         setIsEditingCountdown(false);
     };
+
+    // Determine which items to show in the config list
+    const currentConfigItems: TrackableItem[] = selectedSubject === 'global' 
+        ? settings.trackableItems 
+        : (settings.subjectConfigs?.[selectedSubject] || settings.trackableItems);
 
     return (
         <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -77,7 +97,6 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
                             <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">Weighted Progress</h2>
                             <div className="text-4xl font-black tracking-tight text-slate-800 dark:text-slate-100">{compositeData.composite.toFixed(1)}%</div>
                         </div>
-                        {/* VISIBLE GEAR ICON */}
                         <button 
                             onClick={() => setIsEditingWeights(!isEditingWeights)} 
                             className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-blue-500 hover:text-white transition-all shadow-sm border border-slate-200 dark:border-white/10 z-20"
@@ -101,15 +120,28 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
 
                     {isEditingWeights ? (
                         <div className="bg-slate-100 dark:bg-black/20 rounded-xl p-4 border border-slate-200 dark:border-white/10 animate-in slide-in-from-top-2 duration-200">
-                            <div className="flex justify-between items-center mb-3 text-xs font-bold text-slate-700 dark:text-slate-300">
-                                <span>Adjust Weights</span>
-                                <span className={weightTotal === 100 ? "text-emerald-600 dark:text-green-400" : "text-rose-500 dark:text-rose-400"}>Total: {weightTotal}%</span>
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-500">Configure:</span>
+                                    <select 
+                                        value={selectedSubject} 
+                                        onChange={(e) => setSelectedSubject(e.target.value)}
+                                        className="bg-white dark:bg-white/10 border border-slate-200 dark:border-white/10 rounded px-2 py-1 text-xs font-bold text-slate-800 dark:text-white focus:outline-none"
+                                    >
+                                        <option value="global">Global Defaults</option>
+                                        {Object.entries(settings.syllabus).map(([key, data]) => (
+                                            <option key={key} value={key}>{data.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <span className={`text-xs font-bold ${weightTotal === 100 ? "text-emerald-600 dark:text-green-400" : "text-rose-500 dark:text-rose-400"}`}>Total: {weightTotal}%</span>
                             </div>
+
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                                {TRACKABLE_ITEMS.map(item => (
+                                {currentConfigItems.map(item => (
                                     <div key={item.key} className="flex flex-col gap-1">
-                                        <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase truncate" title={getDisplayName(item.key, item.name)}>
-                                            {getDisplayName(item.key, item.name)}
+                                        <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase truncate" title={item.name}>
+                                            {item.name}
                                         </label>
                                         <input 
                                             type="number" 
@@ -120,18 +152,17 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
                                     </div>
                                 ))}
                             </div>
-                            <Button disabled={weightTotal !== 100} onClick={saveWeights} className={`w-full ${weightTotal !== 100 ? 'opacity-50 cursor-not-allowed' : ''}`}>Save Configuration</Button>
+                            <Button disabled={weightTotal !== 100} onClick={saveWeights} className={`w-full ${weightTotal !== 100 ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                Save for {selectedSubject === 'global' ? 'All' : settings.syllabus[selectedSubject]?.name}
+                            </Button>
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-                            {Object.values(compositeData.breakdown).sort((a,b) => b.weight - a.weight).map(item => {
-                                const originalItem = TRACKABLE_ITEMS.find(t => t.name === item.name);
-                                const displayName = originalItem ? getDisplayName(originalItem.key, item.name) : item.name;
-
+                            {(Object.values(compositeData.breakdown) as { name: string; val: number; weight: number; color: string }[]).sort((a,b) => b.weight - a.weight).map(item => {
                                 return (
                                     <div key={item.name} className={`flex flex-col bg-slate-50/50 dark:bg-white/5 rounded-xl p-2 border border-slate-200 dark:border-white/5 transition-all ${item.weight === 0 ? 'opacity-40 grayscale' : 'opacity-100'}`}>
                                         <div className="flex justify-between items-end mb-1.5">
-                                            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase truncate pr-1" title={displayName}>{displayName}</div>
+                                            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase truncate pr-1" title={item.name}>{item.name}</div>
                                             <div className={`text-[10px] font-mono ${item.weight === 0 ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400 font-bold'}`}>{item.weight}%</div>
                                         </div>
                                         <div className="h-1.5 bg-slate-200 dark:bg-white/10 rounded-full overflow-hidden mb-1">

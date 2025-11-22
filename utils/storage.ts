@@ -1,7 +1,6 @@
-
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, Firestore, initializeFirestore, persistentLocalCache } from 'firebase/firestore';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, Auth } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, sendPasswordResetEmail, Auth } from 'firebase/auth';
 import { FIREBASE_CONFIG } from '../constants';
 import { UserData, UserSettings } from '../types';
 
@@ -36,7 +35,6 @@ try {
 }
 
 // --- Helper: Sanitize Data ---
-// Recursively remove undefined values to prevent Firestore errors
 const sanitize = (obj: any): any => {
     if (obj === undefined) return null;
     if (obj === null) return null;
@@ -170,13 +168,10 @@ export const saveSettings = async (uid: string, settings: UserSettings) => {
     if (!firestore || !uid) return;
     const userDoc = doc(firestore, FIREBASE_USER_COLLECTION, uid);
     try {
-        // Clean data before sending
         const cleanSettings = sanitize(settings);
-        // UpdateDoc REPLACES the 'settings' field entirely with cleanSettings.
         await updateDoc(userDoc, { settings: cleanSettings });
     } catch (e) {
         console.error("Save Settings Failed", e);
-        // Do NOT fallback to merge: true, as it will prevent deletions.
     }
 };
 
@@ -208,6 +203,7 @@ const getErrorMessage = (error: any) => {
     if (code === 'auth/email-already-in-use') return 'User ID/Email already exists.';
     if (code === 'auth/weak-password') return 'Password should be at least 6 characters.';
     if (code === 'auth/network-request-failed') return 'Network error. Check connection.';
+    if (code === 'auth/too-many-requests') return 'Too many attempts. Try later.';
     return error.message || 'Authentication failed.';
 }
 
@@ -236,6 +232,16 @@ export const loginAnonymously = async () => {
     try {
         const result = await signInAnonymously(firebaseAuth);
         return { success: true, uid: result.user.uid };
+    } catch (e: any) {
+        return { success: false, error: getErrorMessage(e) };
+    }
+};
+
+export const resetUserPassword = async (id: string) => {
+    if (!firebaseAuth) return { success: false, error: "Firebase Auth not initialized" };
+    try {
+        await sendPasswordResetEmail(firebaseAuth, getEmail(id));
+        return { success: true };
     } catch (e: any) {
         return { success: false, error: getErrorMessage(e) };
     }

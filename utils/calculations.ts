@@ -21,9 +21,17 @@ export const calculateProgress = (
     // Pre-calculate total weight if we are in weighted mode
     let totalWeight = 0;
     let isWeighted = false;
+    
+    // If no weights provided, treated as unweighted average
     if (weights && Object.keys(weights).length > 0) {
         isWeighted = true;
-        itemIdentifiers.forEach(id => totalWeight += (weights[id] || 0));
+        // Only sum weights for items that actually exist in this subject's context
+        itemIdentifiers.forEach(id => {
+             // Verify item exists in current context
+             if (allItems.find(t => t.key === id)) {
+                 totalWeight += (weights[id] || 0);
+             }
+        });
     }
 
     let p1Total = 0, p1Count = 0, p2Total = 0, p2Count = 0;
@@ -63,39 +71,86 @@ export const calculateProgress = (
 };
 
 export const calculateGlobalComposite = (userData: UserData, settings: UserSettings): CompositeData => {
-    const w = settings.weights || {};
+    const globalWeights = settings.weights || {};
     const syllabus = settings.syllabus;
     const subjects = Object.keys(syllabus);
-    const allItems = settings.trackableItems || TRACKABLE_ITEMS;
     
-    const getGlobalItemAvg = (itemKey: string) => {
-        let sum = 0;
-        if (subjects.length === 0) return 0;
-        
-        subjects.forEach(s => {
-            const p = calculateProgress(s, [itemKey], userData, undefined, allItems, syllabus);
-            sum += p.overall;
-        });
-        return sum / subjects.length;
+    // Helper to determine which items apply to a specific subject
+    const getItemsForSubject = (subKey: string) => {
+        return settings.subjectConfigs?.[subKey] || settings.trackableItems;
     };
 
-    let totalWeightedScore = 0;
-    let totalWeight = 0;
-    let breakdown: any = {};
+    // Helper to get weights for a specific subject (fallback to global)
+    const getWeightsForSubject = (subKey: string) => {
+        return settings.subjectWeights?.[subKey] || globalWeights;
+    };
 
-    allItems.forEach(item => {
-        const weight = w[item.key] || 0;
-        const avg = getGlobalItemAvg(item.key);
-        
-        breakdown[item.key] = { name: item.name, val: avg, weight: weight, color: item.color };
-        
-        if (weight > 0) {
-            totalWeightedScore += avg * weight;
-            totalWeight += weight;
-        }
+    // 1. Calculate Subject Weighted Scores
+    let totalSubjectProgress = 0;
+    
+    subjects.forEach(s => {
+        const items = getItemsForSubject(s);
+        const w = getWeightsForSubject(s);
+        const itemKeys = items.map(i => i.key);
+        const p = calculateProgress(s, itemKeys, userData, w, items, syllabus);
+        totalSubjectProgress += p.overall;
     });
 
-    const composite = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+    const composite = subjects.length > 0 ? totalSubjectProgress / subjects.length : 0;
+
+    // 2. Breakdown Calculation
+    // This is tricky with subject-specific weights. 
+    // We will display the "Global Average" of that item type across all subjects.
+    
+    const allGlobalKeys = new Set<string>();
+    settings.trackableItems.forEach(i => allGlobalKeys.add(i.key));
+    if (settings.subjectConfigs) {
+        Object.values(settings.subjectConfigs).forEach(items => {
+            items.forEach(i => allGlobalKeys.add(i.key));
+        });
+    }
+
+    let breakdown: any = {};
+    let totalWeight = 0; // Only relevant if using global display, but here we calculate weighted average contribution
+    
+    // For the display, we use Global Weights as the "target" visual, or we average the weights?
+    // Let's show the Global Weights for simplicity in the bar chart labels, 
+    // but the Value is the real average.
+    
+    Array.from(allGlobalKeys).forEach(key => {
+        let meta = settings.trackableItems.find(t => t.key === key);
+        if (!meta && settings.subjectConfigs) {
+            for (const conf of Object.values(settings.subjectConfigs)) {
+                meta = conf.find(t => t.key === key);
+                if (meta) break;
+            }
+        }
+        
+        if (!meta) return;
+
+        let itemSum = 0;
+        let subjectCount = 0;
+
+        subjects.forEach(s => {
+            const subjectItems = getItemsForSubject(s);
+            // Check if this subject tracks this item
+            if (subjectItems.find(i => i.key === key)) {
+                // Check weight
+                const sWeights = getWeightsForSubject(s);
+                // We only count it if it has weight in that subject (or exists)
+                const p = calculateProgress(s, [key], userData, undefined, subjectItems, syllabus);
+                itemSum += p.overall;
+                subjectCount++;
+            }
+        });
+
+        const avg = subjectCount > 0 ? itemSum / subjectCount : 0;
+        const weight = globalWeights[key] || 0; // Visual reference
+        
+        breakdown[key] = { name: meta.name, val: avg, weight: weight, color: meta.color };
+        if (weight > 0) totalWeight += weight;
+    });
+
     return { composite, breakdown, totalWeight };
 };
 

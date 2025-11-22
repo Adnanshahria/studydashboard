@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { calculateProgress } from '../utils/calculations';
-import { UserData, UserSettings, ProgressBarConfig, TrackableItem } from '../types';
+import { UserData, UserSettings, ProgressBarConfig, TrackableItem, SubjectData } from '../types';
 import { Modal, ProgressBar, Button } from './UI';
 
 interface SidebarProps {
@@ -53,6 +53,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSubject, onChangeSubject
     const subjectItemsToCalculate = settings.subjectProgressItems || settings.trackableItems.map(t => t.key);
     const subjectWeights = settings.subjectProgressWeights;
 
+    // Retrieve items specific to the active subject (if renamed/added locally) or fallback to global
+    // This ensures renamed columns show up correctly in the modals
+    const activeSubjectItems = settings.subjectConfigs?.[activeSubject] || settings.trackableItems;
+
     return (
         <aside className="flex flex-col gap-6">
             <div className="glass-card p-5 rounded-2xl">
@@ -85,9 +89,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSubject, onChangeSubject
                     </div>
                 </div>
                 <div className="flex flex-col gap-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
-                    {Object.entries(settings.syllabus).map(([key, data]) => {
+                    {(Object.entries(settings.syllabus) as [string, SubjectData][]).map(([key, data]) => {
                         const isActive = activeSubject === key;
-                        const progress = calculateProgress(key, subjectItemsToCalculate, userData, subjectWeights, settings.trackableItems, settings.syllabus);
+                        // Use subject-specific items for calculation if they exist
+                        const itemsForThisSubject = settings.subjectConfigs?.[key] || settings.trackableItems;
+                        const itemKeys = itemsForThisSubject.map(i => i.key);
+
+                        const progress = calculateProgress(key, itemKeys, userData, subjectWeights, itemsForThisSubject, settings.syllabus);
                         const displayName = getDisplayName(key, data.name);
                         
                         let borderColor = 'border-slate-200 dark:border-white/10';
@@ -165,7 +173,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSubject, onChangeSubject
                 <div className="flex flex-col gap-5">
                     {settings.progressBars.filter(conf => conf.visible !== false).map(conf => {
                         if (conf.items.length === 0) return null;
-                        const p = calculateProgress(activeSubject, conf.items, userData, conf.weights, settings.trackableItems, settings.syllabus);
+                        
+                        // Calculate progress based on active subject items to reflect renamed columns
+                        // But wait, progressBars are often cross-subject aggregates. 
+                        // If we want the progress bar *label* to match the active subject rename, we need to use the activeSubject items.
+                        // Note: Sidebar display logic for bars assumes activeSubject context.
+                        
+                        const itemsForThisSubject = settings.subjectConfigs?.[activeSubject] || settings.trackableItems;
+                        const p = calculateProgress(activeSubject, conf.items, userData, conf.weights, itemsForThisSubject, settings.syllabus);
+                        
                         return (
                             <div key={conf.id}>
                                 <div className="flex justify-between text-xs font-semibold mb-1.5 tracking-wide text-slate-700 dark:text-slate-300">
@@ -186,7 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSubject, onChangeSubject
             {showPerfConfig && (
                 <PerformanceConfigModal 
                     currentConfig={settings.progressBars} 
-                    allItems={settings.trackableItems}
+                    allItems={activeSubjectItems} // Pass active subject items here
                     onSave={handlePerfConfigSave} 
                     onClose={() => setShowPerfConfig(false)} 
                 />
@@ -196,7 +212,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSubject, onChangeSubject
                 <SubjectConfigModal
                     currentItems={subjectItemsToCalculate}
                     currentWeights={subjectWeights || {}}
-                    allItems={settings.trackableItems}
+                    allItems={activeSubjectItems} // Pass active subject items here
                     onSave={handleSubjectConfigSave}
                     onClose={() => setShowSubjectConfig(false)}
                 />
@@ -359,7 +375,7 @@ const PerformanceConfigModal = ({ currentConfig, allItems, onSave, onClose }: { 
         <Modal isOpen={true} onClose={onClose} title="Configure Progress Bars">
             <div className="flex flex-col gap-6">
                 {config.map((conf, idx) => {
-                    const totalWeight = conf.weights ? Object.values(conf.weights).reduce((a,b) => a+b, 0) : 0;
+                    const totalWeight = conf.weights ? Object.values(conf.weights).reduce((a: number, b: number) => a+b, 0) : 0;
                     const activeItemsCount = conf.items.length;
                     
                     return (
@@ -468,7 +484,7 @@ const SubjectConfigModal = ({ currentItems, currentWeights, allItems, onSave, on
         setWeights({ ...weights, [key]: Math.max(0, val) });
     };
     
-    const totalWeight = Object.values(weights).reduce((a,b) => a+b, 0);
+    const totalWeight = Object.values(weights).reduce((a: number, b: number) => a+b, 0);
 
     return (
         <Modal isOpen={true} onClose={onClose} title="Configure Subject Progress">
