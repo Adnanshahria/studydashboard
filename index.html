@@ -75,7 +75,7 @@
       html[data-theme="light"] .glass-card {
          background: #ffffff;
          border: 1px solid #e2e8f0;
-         box-shadow: 
+         box-shadow: [c]
             0 4px 6px -1px rgba(0, 0, 0, 0.05), 
             0 2px 4px -1px rgba(0, 0, 0, 0.03);
          backdrop-filter: none;
@@ -84,7 +84,7 @@
       
       @media print {
         body { background: white; color: black; }
-        .no-print { display: none !important; }
+        .no-print { display: none !impoimportantrtant; }
         .print-only { display: block !important; }
       }
     </style>
@@ -99,13 +99,14 @@
     "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
     "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/"
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>

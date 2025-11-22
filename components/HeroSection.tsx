@@ -1,6 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
 import { CompositeData, UserSettings, TrackableItem } from '../types';
-import { TRACKABLE_ITEMS } from '../constants';
 import { Button, Modal } from './UI';
 
 interface HeroSectionProps {
@@ -69,8 +69,6 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
 
     const saveWeights = () => {
         if (weightTotal === 100) {
-            // If global, we pass undefined as subjectKey (or handle in App)
-            // If subject, we pass key
             const key = selectedSubject === 'global' ? undefined : selectedSubject;
             onUpdateWeights(tempWeights, key);
             setIsEditingWeights(false);
@@ -83,6 +81,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
     };
 
     // Determine which items to show in the config list
+    // This is critical: it must show the items *as defined for that subject*
     const currentConfigItems: TrackableItem[] = selectedSubject === 'global' 
         ? settings.trackableItems 
         : (settings.subjectConfigs?.[selectedSubject] || settings.trackableItems);
@@ -137,7 +136,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
                                 <span className={`text-xs font-bold ${weightTotal === 100 ? "text-emerald-600 dark:text-green-400" : "text-rose-500 dark:text-rose-400"}`}>Total: {weightTotal}%</span>
                             </div>
 
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 max-h-[200px] overflow-y-auto custom-scrollbar">
                                 {currentConfigItems.map(item => (
                                     <div key={item.key} className="flex flex-col gap-1">
                                         <label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase truncate" title={item.name}>
@@ -235,7 +234,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ compositeData, streak,
                             <label className="text-xs text-slate-500">Target Date & Time</label>
                             <input 
                                 type="datetime-local"
-                                value={tempTarget.substring(0, 16)} // Limit to yyyy-MM-ddThh:mm
+                                value={tempTarget.substring(0, 16)}
                                 onChange={(e) => setTempTarget(e.target.value)}
                                 className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg p-2 text-sm focus:outline-none focus:border-blue-500 dark:text-white"
                             />

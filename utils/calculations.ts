@@ -1,3 +1,4 @@
+
 import { TRACKABLE_ITEMS } from '../constants';
 import { SyllabusData, TrackableItem, UserData, UserSettings, CompositeData } from '../types';
 
@@ -15,24 +16,20 @@ export const calculateProgress = (
     const subject = syllabus[subjectKey];
     if (!subject) return { overall: 0, p1: 0, p2: 0 };
 
-    // Use chapters directly from the dynamic syllabus
     const allChapters = subject.chapters;
-
-    // Pre-calculate total weight if we are in weighted mode
     let totalWeight = 0;
     let isWeighted = false;
     
-    // If no weights provided, treated as unweighted average
     if (weights && Object.keys(weights).length > 0) {
         isWeighted = true;
-        // Only sum weights for items that actually exist in this subject's context
         itemIdentifiers.forEach(id => {
-             // Verify item exists in current context
              if (allItems.find(t => t.key === id)) {
                  totalWeight += (weights[id] || 0);
              }
         });
     }
+    // If weights sum to 0 (e.g. all weights 0), treat as unweighted to avoid NaN
+    if (totalWeight === 0) isWeighted = false;
 
     let p1Total = 0, p1Count = 0, p2Total = 0, p2Count = 0;
 
@@ -41,13 +38,14 @@ export const calculateProgress = (
         let chapterDivisor = 0;
 
         itemIdentifiers.forEach(itemId => {
+            // Only calculate if item exists in current definition
             const tIdx = allItems.findIndex(t => t.key === itemId);
             if (tIdx === -1) return;
 
             const key = `s_${subjectKey}_${ch.id}_${tIdx}`;
             const score = getPercent(userData[key] ?? 0);
 
-            if (isWeighted && totalWeight > 0) {
+            if (isWeighted) {
                 const w = weights![itemId] || 0;
                 chapterSum += score * w;
                 chapterDivisor += w;
@@ -75,17 +73,14 @@ export const calculateGlobalComposite = (userData: UserData, settings: UserSetti
     const syllabus = settings.syllabus;
     const subjects = Object.keys(syllabus);
     
-    // Helper to determine which items apply to a specific subject
     const getItemsForSubject = (subKey: string) => {
         return settings.subjectConfigs?.[subKey] || settings.trackableItems;
     };
 
-    // Helper to get weights for a specific subject (fallback to global)
     const getWeightsForSubject = (subKey: string) => {
         return settings.subjectWeights?.[subKey] || globalWeights;
     };
 
-    // 1. Calculate Subject Weighted Scores
     let totalSubjectProgress = 0;
     
     subjects.forEach(s => {
@@ -98,9 +93,8 @@ export const calculateGlobalComposite = (userData: UserData, settings: UserSetti
 
     const composite = subjects.length > 0 ? totalSubjectProgress / subjects.length : 0;
 
-    // 2. Breakdown Calculation
-    // This is tricky with subject-specific weights. 
-    // We will display the "Global Average" of that item type across all subjects.
+    // Breakdown Calculation
+    // Aggregates performance per "Item Type" (e.g. "Main Book") across all subjects
     
     const allGlobalKeys = new Set<string>();
     settings.trackableItems.forEach(i => allGlobalKeys.add(i.key));
@@ -111,14 +105,12 @@ export const calculateGlobalComposite = (userData: UserData, settings: UserSetti
     }
 
     let breakdown: any = {};
-    let totalWeight = 0; // Only relevant if using global display, but here we calculate weighted average contribution
-    
-    // For the display, we use Global Weights as the "target" visual, or we average the weights?
-    // Let's show the Global Weights for simplicity in the bar chart labels, 
-    // but the Value is the real average.
+    let totalWeight = 0;
     
     Array.from(allGlobalKeys).forEach(key => {
+        // Find metadata for display
         let meta = settings.trackableItems.find(t => t.key === key);
+        // Fallback to subject specific config if not in global
         if (!meta && settings.subjectConfigs) {
             for (const conf of Object.values(settings.subjectConfigs)) {
                 meta = conf.find(t => t.key === key);
@@ -133,11 +125,7 @@ export const calculateGlobalComposite = (userData: UserData, settings: UserSetti
 
         subjects.forEach(s => {
             const subjectItems = getItemsForSubject(s);
-            // Check if this subject tracks this item
             if (subjectItems.find(i => i.key === key)) {
-                // Check weight
-                const sWeights = getWeightsForSubject(s);
-                // We only count it if it has weight in that subject (or exists)
                 const p = calculateProgress(s, [key], userData, undefined, subjectItems, syllabus);
                 itemSum += p.overall;
                 subjectCount++;
@@ -145,7 +133,7 @@ export const calculateGlobalComposite = (userData: UserData, settings: UserSetti
         });
 
         const avg = subjectCount > 0 ? itemSum / subjectCount : 0;
-        const weight = globalWeights[key] || 0; // Visual reference
+        const weight = globalWeights[key] || 0; 
         
         breakdown[key] = { name: meta.name, val: avg, weight: weight, color: meta.color };
         if (weight > 0) totalWeight += weight;
@@ -155,25 +143,37 @@ export const calculateGlobalComposite = (userData: UserData, settings: UserSetti
 };
 
 export const getStreak = (userData: UserData): number => {
-    const dates = Object.keys(userData)
-        .filter(k => k.startsWith('timestamp_'))
-        .map(k => userData[k] ? new Date(userData[k]).toLocaleDateString('en-CA') : null)
-        .filter(Boolean) as string[];
-        
-    const uniqueDates = [...new Set(dates)].sort().reverse();
-    if (!uniqueDates.length) return 0;
-    
-    const today = new Date().toLocaleDateString('en-CA');
-    const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
-    
-    if (uniqueDates[0] !== today && uniqueDates[0] !== yesterday) return 0; 
-
-    let streak = 1;
-    let current = new Date(uniqueDates[0]);
-    for (let i = 1; i < uniqueDates.length; i++) {
-        current.setDate(current.getDate() - 1);
-        if (uniqueDates[i] === current.toLocaleDateString('en-CA')) streak++;
-        else break;
+    const dates = new Set<string>();
+    for (const key in userData) {
+        if (key.startsWith('timestamp_')) {
+            const val = userData[key];
+            if (typeof val === 'string') {
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) {
+                    dates.add(d.toISOString().split('T')[0]);
+                }
+            }
+        }
     }
+    
+    if (dates.size === 0) return 0;
+    
+    let streak = 0;
+    const current = new Date();
+    const toDateStr = (d: Date) => d.toISOString().split('T')[0];
+    let dateStr = toDateStr(current);
+    
+    if (!dates.has(dateStr)) {
+        current.setDate(current.getDate() - 1);
+        dateStr = toDateStr(current);
+        if (!dates.has(dateStr)) return 0;
+    }
+    
+    while(dates.has(dateStr)) {
+        streak++;
+        current.setDate(current.getDate() - 1);
+        dateStr = toDateStr(current);
+    }
+    
     return streak;
 };

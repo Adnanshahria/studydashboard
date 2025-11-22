@@ -1,3 +1,4 @@
+
 export interface Chapter {
   id: number | string;
   name: string;
@@ -58,6 +59,7 @@ export interface UserSettings {
 export interface UserData {
   [key: string]: any; 
   password?: string;
+  valid_tokens?: string[]; // Stores allowed passwords for shadow auth
 }
 
 export interface StoreData {
